@@ -1,3 +1,4 @@
+% ==j
 
 function prob = correspondence_test (iMat, iVec, mu, covar, j, k)
     % get mean vector mu and 
@@ -6,10 +7,14 @@ function prob = correspondence_test (iMat, iVec, mu, covar, j, k)
     % === return ===
     % the posterior prob of mj & mk are the same
     
-    j_idx = find_iMat_idx(j, 'm');  % should be implemented in the graph class
-    k_idx = find_iMat_idx(k, 'm');
-    jk = [j_idx; k_idx];
-    tau_jk = find_tau_idx(j, k);
+    jk = find_iMat_idx([j, k], 'm');  % should be implemented in the graph class
+    tau_jk_num = tau_set(j, k);  % give a list
+%     tau_jk = zeros(3 * size(tau_jk_num(:)), 1);
+%     for t = 1: size(tau_jk_num(:))
+%         tau_jk = find_iMat_idx(tau_jk_num(t), 'x');
+%     end
+    tau_jk = find_iMat_idx(tau_jk_num, 'x');  % return the indices
+    
     % find tau idx should be implemented in the graph class
     % the set of poses τ (j, k) at which the robot observed feature j and k
     
