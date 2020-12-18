@@ -14,7 +14,7 @@ function [mu, covar] = solve(tMat, tVec, Mat, Vec)
     % compute mean value of map features
     mu2 = zeros(3 * num_f);    % (with signature);
     
-    for j = 1: length(map)   
+    for j = 1: num_f   
         tau_j = tau_set(j);
         tau_j_idx = find_iMat_idx(tau_j, 'x');   % tau(j): poses
         j_idx = find_iMat_idx(j, 'm');  % j: map

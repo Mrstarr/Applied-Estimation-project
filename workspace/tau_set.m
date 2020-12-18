@@ -2,5 +2,6 @@
 
 function idx = tau_set(i)
     % this function should be provided.
-    idx;
+    % input a list of features idx
+    % output a list of corresponding poses idx
 end
