@@ -1,14 +1,15 @@
-% ==j
+%$%
+% This method should be inside GraphSLAM class.
+% NOTE: should return a (x, 1) matrix
 
-function idx = find_iMat_idx(num, str)
+function idx = find_iMat_idx(obj, num, str)
     % get indices of the info matrix
     % num: can be a single num or a list
     % str: 'x': pose; 'm': maps
     
-    % how to get this? the number of poses.
-    global numX
+    % GLOBAL VARIABLES
+    numX = size(obj.x, 2);
     
-    % here i assume...
     if str == 'x'
         len = size(num(:), 1);
         if len == 1
@@ -45,5 +46,4 @@ function idx = find_iMat_idx(num, str)
         idx = idx + bias;
     end
     
-    % note: should return a (x, 1) matrix
 end
