@@ -181,12 +181,12 @@ classdef GraphSLAM < handle
             % compute mean value of map features
             mu2 = zeros(3 * numM,1);    % (with signature);
 
-            %for j = 1: numM
-                    %tau_j = obj.tau{j};
-                    %tau_j_idx = (3*(tau_j-1)+1):3*tau_j;   % tau(j): poses
-                    %j_idx = find_iMat_idx(obj, j, 'm');  % j: map
-                    %mu2(3*j-2:3*j) = obj.H(j_idx, j_idx) \ (obj.b(j_idx) + obj.H(j_idx, tau_j_idx) * tVec(tau_j_idx));
-            %end
+            for j = 1: numM
+                tau_j = obj.tau{j};
+                tau_j_idx = (3*(tau_j-1)+1):3*tau_j;   % tau(j): poses
+                j_idx = find_iMat_idx(obj, j, 'm');  % j: map
+                mu2(3*j-2:3*j) = obj.H(j_idx, j_idx) \ (obj.b(j_idx) + obj.H(j_idx, tau_j_idx) * tVec(tau_j_idx));
+            end
 
             mu = [mu1; mu2];
             fprintf("GraphSLAM solve completed\n")
