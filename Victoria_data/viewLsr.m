@@ -1,4 +1,4 @@
-function ViewLsr
+function viewLsr
 
 %function ViewLsr(FileName,figu,dttt)
 % Jose. ACFR. 1999.
@@ -9,7 +9,6 @@ figu = 1 ;
 
 global AAr; 
 AAr = [0:360]*pi/360 ;
-load(FileName) ;
 L = size(LASER) ; L=L(1) ;
 Time = double(TLsr) ; clear TLsr; 
 CAAA = cos(AAr) ;
@@ -29,9 +28,9 @@ axis([-50,50,0,75]);
 hold off ;
 
 Mask13 = uint16(2^13 -1) ;
-MaskA  = bitcmp(Mask13,16) ;
+MaskA  = bitcmp(Mask13,'uint16') ;
 
-for i=1:L,
+for i=1:L
 	RR = double(  bitand( Mask13,LASER(i,:)) ) ;
 	a  = uint16(  bitand( MaskA ,LASER(i,:)) ) ;
 	ii = find(a>0) ;
@@ -48,7 +47,7 @@ for i=1:L,
 	DibuTrees(xl,yl,xra(3,:),hhh3) ;
 
 	pause(dttt) ;
-end;
+end
 return ;
 
 % --------------------------------------------
@@ -64,17 +63,17 @@ z=1 ;
 xyAllC = zeros(2,nc*nl+nl) ;
 xxx    = zeros(2,nl) ;
 
-for i=1:nl,
+for i=1:nl
 	Ri=rl(i)*0.5 ;
 	xyCi(1,:)= pCircles(1,:)*Ri + xl(i) ;
 	xyCi(2,:)= pCircles(2,:)*Ri + yl(i) ;
 	xyAllC(:,u:u+nc-1)=xyCi ;
 	xxx(:,nl-i+1) = xyCi(:,1) ;
 	u=u+nc ;
-end ;
+end
 xyAllC(:,u:end) = xxx ;
 set(hdl,'XData',xyAllC(1,:),'YData',xyAllC(2,:)) ;	
-return ;
+return
 
 
 % --------------------------------------------

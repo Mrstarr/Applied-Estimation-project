@@ -1,9 +1,0 @@
-% This function treats motion data to control input
-% Motion struct with fields:
-%    steering: [61945×1 double] in m/secs.
-%       speed: [61945×1 double] in radians.
-%        time: [61945×1 double] in millisecs.
-% Finally t
-function U = motion_dataprocess(DR)
-
-end
