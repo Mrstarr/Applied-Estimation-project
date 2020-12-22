@@ -23,7 +23,9 @@ classdef GraphSLAM < handle
 
         % initialize the pose graph
         function initialize(obj,time,TLsr,u,zt)
-            I = round(size(u,2)/20);
+            global DEBUG
+            
+            I = round(size(u,2)/200);
             ILsr = size(zt,2);
             
             % u & x
@@ -35,7 +37,12 @@ classdef GraphSLAM < handle
             obj.u(3,:) = diff(time(1,1:I)); % time difference           
             
             global x0
-            obj.x(:,1) = x0;
+            if DEBUG
+                obj.x(:, 1) = zeros(3, 1);
+                disp('=== initializing in DEBUG mode ===');
+            else
+                obj.x(:,1) = x0;
+            end
             
             % tranverse all control and measurement 
             j = 1;
@@ -148,20 +155,49 @@ classdef GraphSLAM < handle
             fprintf("Size of Information matrix: %d * %d\n", size(obj.H))
         end       
         
+%         function [tMat, tVec] = reduce(obj)
+%             tMat = obj.H;
+%             tVec = obj.b;
+%             numM = size(obj.m, 2);
+%             
+%             for j =1:numM
+%                 for g = obj.tau{j}
+%                     % find corresponding index of j and x
+% %                     idx_x = (3*(g-1)+1):3*g;
+% %                     idx_j = (3*(j-1)+1+3*size(obj.x,2)):(3*j+3*size(obj.x,2));
+%                     idx_x = find_iMat_idx(obj,g,"x");
+%                     idx_j = find_iMat_idx(obj,j,"m");
+%                     % reduce H and b
+%                     tVec(idx_x) = tVec(idx_x)- tMat(idx_x,idx_j)/tMat(idx_j,idx_j)*tVec(idx_j);
+%                     tMat(idx_x,idx_x) = tMat(idx_x,idx_x)- tMat(idx_x,idx_j)/tMat(idx_j,idx_j)*tMat(idx_j,idx_x);
+%                 end
+%                 % remove rows/columns corresponding to j            
+%             end
+%             M = size(obj.x,2);
+%             tMat = tMat(1:M*3,1:M*3);
+%             tVec = tVec(1:M*3);
+%             fprintf("GraphSLAM reduce completed\n")
+%         end
+
         function [tMat, tVec] = reduce(obj)
             tMat = obj.H;
             tVec = obj.b;
+            numX = size(obj.x, 2);
             numM = size(obj.m, 2);
             
             for j =1:numM
-                for g = obj.tau{j}
-                    % find corresponding index of j and x
-                    idx_x = (3*(g-1)+1):3*g;
-                    idx_j = (3*(j-1)+1+3*size(obj.x,2)):(3*j+3*size(obj.x,2));
-                    % reduce H and b
-                    tVec(idx_x) = tVec(idx_x)- tMat(idx_x,idx_j)/tMat(idx_j,idx_j)*tVec(idx_j);
-                    tMat(idx_x,idx_x) = tMat(idx_x,idx_x)- tMat(idx_x,idx_j)/tMat(idx_j,idx_j)*tMat(idx_j,idx_x);
-                end
+                g = obj.tau{j};
+                g = sort(g);   % asc
+
+                % find corresponding index of j and x
+%                     idx_x = (3*(g-1)+1):3*g;
+%                     idx_j = (3*(j-1)+1+3*size(obj.x,2)):(3*j+3*size(obj.x,2));
+                idx_x = find_iMat_idx(obj,g,"x");
+                idx_j = find_iMat_idx(obj,j,"m");
+                % reduce H and b
+                tVec(idx_x) = tVec(idx_x)- tMat(idx_x,idx_j)/tMat(idx_j,idx_j)*tVec(idx_j);
+                tMat(idx_x,idx_x) = tMat(idx_x,idx_x)- tMat(idx_x,idx_j)/tMat(idx_j,idx_j)*tMat(idx_j,idx_x);
+
                 % remove rows/columns corresponding to j            
             end
             M = size(obj.x,2);
@@ -169,6 +205,7 @@ classdef GraphSLAM < handle
             tVec = tVec(1:M*3);
             fprintf("GraphSLAM reduce completed\n")
         end
+
         
         function [mu, cov] = solve(obj, tMat, tVec)
             % INPUT: tMat, tVec are info mat and vec with tilde
@@ -202,13 +239,18 @@ classdef GraphSLAM < handle
         end
         
         function prob = correspondence_test (obj, mu, covar, j, k)
+            global DEBUG
             % TARGET: get mean vector mu and the path covariance covar(0~t)
             % from GraphSLAM_solve
             % INPUT: iVec not needed. deleted.
             % OUTPUT: the posterior prob of mj & mk are the same
 
             jk = find_iMat_idx(obj, [j, k], 'm');          % mat idx: feature j&k 
-            tau_jk_num = intersect(obj.tau{j},obj.tau{k});                    % the tau poses of j
+            if DEBUG
+                tau_jk_num = union(obj.tau{j},obj.tau{k});   % the tau poses of j
+            else
+                tau_jk_num = intersect(obj.tau{j},obj.tau{k});   % the tau poses of j
+            end
             tau_jk = find_iMat_idx(obj, tau_jk_num, 'x');  % mat idx: tau-poses
 
             % tau_set() should be implemented in the graph class
@@ -226,12 +268,19 @@ classdef GraphSLAM < handle
             % info of the difference variable
             iMat_diff = [eye(3), -eye(3)] * iMat_margin * [eye(3); -eye(3)];
             iVec_diff = [eye(3), -eye(3)] * iVec_margin;
-            mu_diff = iMat_diff \ iVec_diff;
-
+%             mu_diff = iMat_diff \ iVec_diff;
+            mu_diff = [eye(3), -eye(3)] * mu(jk);
+;
             %prob = sqrt(det(iMat_diff))/sqrt(2*pi) * ...
-                exp(-0.5 * mu_diff' / iMat_diff * mu_diff);
-            prob = 1/sqrt(2*pi) * ...
-                exp(-0.5 * mu_diff' / iMat_diff * mu_diff);
+%                 exp(-0.5 * mu_diff' / iMat_diff * mu_diff);
+            if DEBUG
+                prob = sqrt(det(iMat_diff))/sqrt(2*pi) * ...
+                    exp(-0.5 * mu_diff' / iMat_diff * mu_diff);
+%                 disp('=== corresponding in DEBUG mode ===');
+            else
+                prob = 1/sqrt(2*pi) * ...
+                    exp(-0.5 * mu_diff' / iMat_diff * mu_diff);
+            end
 
         end
         
@@ -245,7 +294,7 @@ classdef GraphSLAM < handle
         function batch_association(obj,mu,cov)
             N = size(obj.m,2);
             tic
-            for m_j = 1:N
+            for m_j = 1:100
                 for m_k = m_j+1:N
                     if obj.z.c(m_k) < m_k
                         continue
@@ -253,7 +302,7 @@ classdef GraphSLAM < handle
                     
                     P_jk = correspondence_test(obj,mu,cov,m_j,m_k);
                     %fprintf("P between %d and %d is %d\n",m_j,m_k,P_jk);
-                    if P_jk > 0.3
+                    if P_jk > 0.2
                         obj.z.c(m_k) = m_j;
                     end
                 end
@@ -305,6 +354,12 @@ classdef GraphSLAM < handle
             [mu, cov] = solve(obj, tMat, tVec);
             batch_association(obj,mu,cov)
             update_map(obj)
+                
+            plot(obj.x(1,1),obj.x(2,1),'k*', 'MarkerSize', 8)
+            hold on
+            plot(obj.x(1,:),obj.x(2,:),'k');   
+            hold on
+            plot(obj.m(1,:),obj.m(2,:),'bo','MarkerSize', 8);
             
             if verbose > 2
                 linearize(obj);
