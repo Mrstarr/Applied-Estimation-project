@@ -39,7 +39,8 @@ classdef GraphSLAM < handle
             obj.u(3,:) = diff(time(1,1:I)); % time difference           
             
             global x0
-            obj.x(:,1) = [0;0;0];
+            %obj.x(:,1) = [0;0;0];
+            obj.x(:,1) = x0;
             
             % initialization
             j = 1;
@@ -160,18 +161,18 @@ classdef GraphSLAM < handle
             tVec = obj.b;
             
             for j =1:obj.N_ldm
-                for g = obj.tau{j}
+                    g = obj.tau{j};
                     % find corresponding index of j and x
                     idx_x = find_iMat_idx(obj,g,"x");
                     idx_j = find_iMat_idx(obj,j,"m");
                     % reduce H and b
                     tVec(idx_x) = tVec(idx_x)- tMat(idx_x,idx_j)/tMat(idx_j,idx_j)*tVec(idx_j);
                     tMat(idx_x,idx_x) = tMat(idx_x,idx_x)- tMat(idx_x,idx_j)/tMat(idx_j,idx_j)*tMat(idx_j,idx_x);
-                end
                 % remove rows/columns corresponding to j            
             end
             tMat = tMat(1:obj.N_X*3,1:obj.N_X*3);
             tVec = tVec(1:obj.N_X*3);
+
             fprintf("GraphSLAM reduce completed\n")
         end
         
@@ -199,9 +200,9 @@ classdef GraphSLAM < handle
                 tau_j = obj.tau{j};
                 tau_j_idx = find_iMat_idx(obj, tau_j,'x');   % tau(j): poses
                 j_idx = find_iMat_idx(obj, j, 'm');  % j: map
-                mu2(3*j-2:3*j) = obj.H(j_idx, j_idx) \ (obj.b(j_idx) + obj.H(j_idx, tau_j_idx) * tVec(tau_j_idx));
+                mu2(3*j-2:3*j) = obj.H(j_idx, j_idx) \ (obj.b(j_idx) + obj.H(j_idx, tau_j_idx) * mu1(tau_j_idx));
             end
-
+            cov = full(cov);
             mu = [mu1; mu2];
             fprintf("GraphSLAM solve completed\n")
         end
@@ -231,13 +232,13 @@ classdef GraphSLAM < handle
             % info of the difference variable
             iMat_diff = [eye(3), -eye(3)] * iMat_margin * [eye(3); -eye(3)];
             iVec_diff = [eye(3), -eye(3)] * iVec_margin;
-            %mu_diff = iMat_diff \ iVec_diff;
+            mu_diff = iMat_diff \ iVec_diff;
             mu_diff = [eye(3), -eye(3)] * mu(jk);
-
+            global noise
             %prob = sqrt(det(iMat_diff))/sqrt(2*pi) * ...
             %    exp(-0.5 * mu_diff' / iMat_diff * mu_diff);
-            prob = 1/sqrt(2*pi) * ...
-                exp(-0.5 * abs(mu_diff' / iMat_diff * mu_diff));
+            prob = (2*pi*det(noise.Q))^(-0.5)*...
+                exp(-0.5 * abs(mu_diff' / noise.Q * mu_diff));
 
         end
         
@@ -259,8 +260,8 @@ classdef GraphSLAM < handle
                     
                     P_jk = correspondence_test(obj,mu,cov,m_j,m_k);
                     %fprintf("P between %d and %d is %d\n",m_j,m_k,P_jk);
-                    if P_jk > 0.35
-                        obj.z.c(m_k) = m_j;
+                    if P_jk > 1
+                        obj.z.c(obj.z.c == m_k) = m_j;
                     end
                 end
                 if mod(m_j,100) == 0
@@ -308,17 +309,17 @@ classdef GraphSLAM < handle
         end           
             
         function run(obj, verbose)
-            close all
             linearize(obj);
             [tMat, tVec] = reduce(obj);
             [mu, cov] = solve(obj, tMat, tVec);
+            
             if verbose == 2
                 batch_association(obj,mu,cov)
                 update_map(obj)
-                hold on
-                plot(obj.x(1,:),obj.x(2,:),'k');    
-                plot(obj.m(1,:),obj.m(2,:),'b.','MarkerSize', 4);
-                close all 
+%                 hold on
+%                 plot(obj.x(1,:),obj.x(2,:),'k');    
+%                 plot(obj.m(1,:),obj.m(2,:),'b.','MarkerSize', 4);
+%                 close all 
                 
                 linearize(obj);
                 [tMat, tVec] = reduce(obj);
@@ -326,13 +327,13 @@ classdef GraphSLAM < handle
                  Mu = reshape(mu, 3, size(mu,1)/3);
                  hold on
                  plot(Mu(1,1:obj.N_X),Mu(2,1:obj.N_X),'k');
-                 plot(Mu(1,obj.N_ldm + 1:obj.N_ldm +obj.N_X),Mu(2,obj.N_ldm +1:obj.N_ldm +obj.N_X),'MarkerSize', 4);
+                 plot(Mu(1,obj.N_X + 1:obj.N_ldm +obj.N_X),Mu(2,obj.N_X +1:obj.N_ldm +obj.N_X),'b.','MarkerSize', 4);
                  close all
             end
             
             if verbose == 3
                 j = 1;
-                while j < 8
+                while j < 5
                     batch_association(obj,mu,cov)
                     update_map(obj)
                     
