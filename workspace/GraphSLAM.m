@@ -11,7 +11,9 @@ classdef GraphSLAM < handle
         tau % the set of all poses xt at which landmark was observed
         n_node  % Number of nodes in graph
         n_edge  % Number of edges in graph
-        n_ldm   % Number of landmarks      
+        N_ldm   % Number of landmarks
+        N_X     % Number of states 
+        N_Z     % Number of measurement
     end  % properties set private
     
     properties (Dependent = true)
@@ -23,9 +25,9 @@ classdef GraphSLAM < handle
 
         % initialize the pose graph
         function initialize(obj,time,TLsr,u,zt)
-            global DEBUG
-            
-            I = round(size(u,2)/200);
+            %I = round(size(u,2)/20);
+            %I = 10;
+            global I 
             ILsr = size(zt,2);
             
             % u & x
@@ -37,35 +39,38 @@ classdef GraphSLAM < handle
             obj.u(3,:) = diff(time(1,1:I)); % time difference           
             
             global x0
-            if DEBUG
-                obj.x(:, 1) = zeros(3, 1);
-                disp('=== initializing in DEBUG mode ===');
-            else
-                obj.x(:,1) = x0;
-            end
+            obj.x(:,1) = [0;0;0];
             
-            % tranverse all control and measurement 
+            % initialization
             j = 1;
-            obj.n_ldm = 0;
+            obj.N_ldm = 0;
+            obj.N_Z = 0;
+            obj.N_X = 1;  % x0 already exists
             obj.z.m = []; % measurement 
             obj.z.idx = []; % time index i
             obj.z.c = []; % correspondence
+            
+            % input all control info
             for i = 1:size(obj.u,2)
                 obj.x(:,i+1) = predict(obj.x(:,i),obj.u(:,i));
+                obj.N_X = obj.N_X + 1; 
+                % when new landmarks detected
                 if j <= ILsr
                     if TLsr(j) < time(i)
                         % add new measurement
+                        n_zt = size(zt{j},2);
                         obj.z.m = [obj.z.m zt{j}];  
-                        obj.z.idx = [obj.z.idx i * ones(1,size(zt{j},2))]; 
-                        obj.z.c = [obj.z.c (obj.n_ldm + 1):obj.n_ldm + size(zt{j},2)]; 
-                       
+                        obj.z.idx = [obj.z.idx i * ones(1,n_zt)]; 
+                        obj.z.c = [obj.z.c (obj.N_ldm + 1):obj.N_ldm + n_zt]; 
+                        obj.N_Z = obj.N_Z + n_zt;
+                        
                         % add new landmark
                         ldm = add_landmark(obj.x(:,i),zt{j});   
                         obj.m = [obj.m ldm];
-                        for q = (obj.n_ldm + 1) : (obj.n_ldm + size(zt{j},2))
-                            obj.tau{q} = [ i ];
+                        for q = (obj.N_ldm + 1) : (obj.N_ldm + size(zt{j},2))
+                            obj.tau{q} = i; % tau{q}: list of index of x where detects landmark q 
                         end
-                        obj.n_ldm = obj.n_ldm + size(zt{j},2);
+                        obj.N_ldm = obj.N_ldm + n_zt;
                         j = j + 1;
                     end
                 end     
@@ -80,10 +85,10 @@ classdef GraphSLAM < handle
               
         function linearize(obj)
             global noise
-            R = noise.R;
-            Q = noise.Q;
+            R = noise.R;    % motion error
+            Q = noise.Q;    % measurement error
             % initialize H and b
-            obj.n_node = size(obj.x,2)+size(obj.m,2);
+            obj.n_node = obj.N_X + obj.N_ldm;
             obj.H = zeros(3*obj.n_node,3*obj.n_node);
             obj.b = zeros(obj.n_node*3,1);
 
@@ -113,14 +118,14 @@ classdef GraphSLAM < handle
             end
             
             % tranverse all measurement
-            for j = 1:size(obj.z.c,2)
+            for j = 1:obj.N_Z
                 
-                cj = obj.z.c(j);
+                c = obj.z.c(j);
                 t = obj.z.idx(j);
-                dlt = [obj.m(1,cj) - obj.x(1,t);
-                         obj.m(2,cj) - obj.x(2,t)];
+                dlt = [obj.m(1,c) - obj.x(1,t);
+                         obj.m(2,c) - obj.x(2,t)];
                 q = dlt'*dlt;
-                z_hat = [sqrt(q);atan2(dlt(2),dlt(1))-obj.x(3,t)+pi/2;obj.m(3,cj)];
+                z_hat = [sqrt(q);atan2(dlt(2),dlt(1))-obj.x(3,t)+pi/2;obj.m(3,c)];
                 H_1 = 1/q * [ -sqrt(q) * dlt(1) -sqrt(q) * dlt(2) 0;
                               dlt(2)  -dlt(1)  -q;
                               0 0 0];
@@ -130,13 +135,13 @@ classdef GraphSLAM < handle
 
                 % update information matrix       
                 t_idx = (3*(t-1)+1):3*t;
-                j_idx = (3*(cj-1)+1+3*size(obj.x,2)):(3*cj+3*size(obj.x,2));
+                j_idx = (3*(c-1)+1+3*obj.N_X):(3*c+3*obj.N_X);
                 H_11 = H_1' / Q * H_1;
                 H_12 = H_1' / Q * H_2;
                 H_21 = H_2' / Q * H_1;
                 H_22 = H_2' / Q * H_2;
-                b1 = H_1' / Q * (obj.z.m(:,j) - z_hat + [H_1 H_2]*[obj.x(:,t); obj.m(:,cj)]);
-                b2 = H_2' / Q * (obj.z.m(:,j) - z_hat + [H_1 H_2]*[obj.x(:,t); obj.m(:,cj)]);
+                b1 = H_1' / Q * (obj.z.m(:,j) - z_hat + [H_1 H_2]*[obj.x(:,t); obj.m(:,c)]);
+                b2 = H_2' / Q * (obj.z.m(:,j) - z_hat + [H_1 H_2]*[obj.x(:,t); obj.m(:,c)]);
 
                 obj.H(t_idx,t_idx) = obj.H(t_idx,t_idx) + H_11;
                 obj.H(t_idx,j_idx) = obj.H(t_idx,j_idx) + H_12;
@@ -146,74 +151,37 @@ classdef GraphSLAM < handle
                 obj.b(j_idx) = obj.b(j_idx) + b2;
             end
             
-%             H_sparse = sparse(obj.H);
-%             mu = H_sparse \ obj.b;
-%             Mu = reshape(mu, 3, size(mu,1)/3);
-%             numX = size(obj.x, 2)
-%             plot(Mu(1,1:numX),Mu(2,1:numX),'b')
             fprintf("Linearization Complete\n")
             fprintf("Size of Information matrix: %d * %d\n", size(obj.H))
         end       
         
-%         function [tMat, tVec] = reduce(obj)
-%             tMat = obj.H;
-%             tVec = obj.b;
-%             numM = size(obj.m, 2);
-%             
-%             for j =1:numM
-%                 for g = obj.tau{j}
-%                     % find corresponding index of j and x
-% %                     idx_x = (3*(g-1)+1):3*g;
-% %                     idx_j = (3*(j-1)+1+3*size(obj.x,2)):(3*j+3*size(obj.x,2));
-%                     idx_x = find_iMat_idx(obj,g,"x");
-%                     idx_j = find_iMat_idx(obj,j,"m");
-%                     % reduce H and b
-%                     tVec(idx_x) = tVec(idx_x)- tMat(idx_x,idx_j)/tMat(idx_j,idx_j)*tVec(idx_j);
-%                     tMat(idx_x,idx_x) = tMat(idx_x,idx_x)- tMat(idx_x,idx_j)/tMat(idx_j,idx_j)*tMat(idx_j,idx_x);
-%                 end
-%                 % remove rows/columns corresponding to j            
-%             end
-%             M = size(obj.x,2);
-%             tMat = tMat(1:M*3,1:M*3);
-%             tVec = tVec(1:M*3);
-%             fprintf("GraphSLAM reduce completed\n")
-%         end
-
         function [tMat, tVec] = reduce(obj)
             tMat = obj.H;
             tVec = obj.b;
-            numX = size(obj.x, 2);
-            numM = size(obj.m, 2);
             
-            for j =1:numM
-                g = obj.tau{j};
-                g = sort(g);   % asc
-
-                % find corresponding index of j and x
-%                     idx_x = (3*(g-1)+1):3*g;
-%                     idx_j = (3*(j-1)+1+3*size(obj.x,2)):(3*j+3*size(obj.x,2));
-                idx_x = find_iMat_idx(obj,g,"x");
-                idx_j = find_iMat_idx(obj,j,"m");
-                % reduce H and b
-                tVec(idx_x) = tVec(idx_x)- tMat(idx_x,idx_j)/tMat(idx_j,idx_j)*tVec(idx_j);
-                tMat(idx_x,idx_x) = tMat(idx_x,idx_x)- tMat(idx_x,idx_j)/tMat(idx_j,idx_j)*tMat(idx_j,idx_x);
-
+            for j =1:obj.N_ldm
+                for g = obj.tau{j}
+                    % find corresponding index of j and x
+                    idx_x = find_iMat_idx(obj,g,"x");
+                    idx_j = find_iMat_idx(obj,j,"m");
+                    % reduce H and b
+                    tVec(idx_x) = tVec(idx_x)- tMat(idx_x,idx_j)/tMat(idx_j,idx_j)*tVec(idx_j);
+                    tMat(idx_x,idx_x) = tMat(idx_x,idx_x)- tMat(idx_x,idx_j)/tMat(idx_j,idx_j)*tMat(idx_j,idx_x);
+                end
                 % remove rows/columns corresponding to j            
             end
-            M = size(obj.x,2);
-            tMat = tMat(1:M*3,1:M*3);
-            tVec = tVec(1:M*3);
+            tMat = tMat(1:obj.N_X*3,1:obj.N_X*3);
+            tVec = tVec(1:obj.N_X*3);
             fprintf("GraphSLAM reduce completed\n")
         end
-
         
-        function [mu, cov] = solve(obj, tMat, tVec)
+         function [mu, cov] = solve(obj, tMat, tVec)
             % INPUT: tMat, tVec are info mat and vec with tilde
             % with tilde means only the poses, but not the map!
             % OUTPUT: mean value and coviance
 
             % GLOBAL VARIABLES
-            numM = size(obj.m, 2);
+            numM = obj.N_ldm;
             
             tic
             H_sparse = sparse(tMat);
@@ -229,7 +197,7 @@ classdef GraphSLAM < handle
 
             for j = 1: numM
                 tau_j = obj.tau{j};
-                tau_j_idx = (3*(tau_j-1)+1):3*tau_j;   % tau(j): poses
+                tau_j_idx = find_iMat_idx(obj, tau_j,'x');   % tau(j): poses
                 j_idx = find_iMat_idx(obj, j, 'm');  % j: map
                 mu2(3*j-2:3*j) = obj.H(j_idx, j_idx) \ (obj.b(j_idx) + obj.H(j_idx, tau_j_idx) * tVec(tau_j_idx));
             end
@@ -239,18 +207,13 @@ classdef GraphSLAM < handle
         end
         
         function prob = correspondence_test (obj, mu, covar, j, k)
-            global DEBUG
             % TARGET: get mean vector mu and the path covariance covar(0~t)
             % from GraphSLAM_solve
             % INPUT: iVec not needed. deleted.
             % OUTPUT: the posterior prob of mj & mk are the same
 
             jk = find_iMat_idx(obj, [j, k], 'm');          % mat idx: feature j&k 
-            if DEBUG
-                tau_jk_num = union(obj.tau{j},obj.tau{k});   % the tau poses of j
-            else
-                tau_jk_num = intersect(obj.tau{j},obj.tau{k});   % the tau poses of j
-            end
+            tau_jk_num = union(obj.tau{j},obj.tau{k});                    % the tau poses of j
             tau_jk = find_iMat_idx(obj, tau_jk_num, 'x');  % mat idx: tau-poses
 
             % tau_set() should be implemented in the graph class
@@ -268,19 +231,13 @@ classdef GraphSLAM < handle
             % info of the difference variable
             iMat_diff = [eye(3), -eye(3)] * iMat_margin * [eye(3); -eye(3)];
             iVec_diff = [eye(3), -eye(3)] * iVec_margin;
-%             mu_diff = iMat_diff \ iVec_diff;
+            %mu_diff = iMat_diff \ iVec_diff;
             mu_diff = [eye(3), -eye(3)] * mu(jk);
-;
+
             %prob = sqrt(det(iMat_diff))/sqrt(2*pi) * ...
-%                 exp(-0.5 * mu_diff' / iMat_diff * mu_diff);
-            if DEBUG
-                prob = sqrt(det(iMat_diff))/sqrt(2*pi) * ...
-                    exp(-0.5 * mu_diff' / iMat_diff * mu_diff);
-%                 disp('=== corresponding in DEBUG mode ===');
-            else
-                prob = 1/sqrt(2*pi) * ...
-                    exp(-0.5 * mu_diff' / iMat_diff * mu_diff);
-            end
+            %    exp(-0.5 * mu_diff' / iMat_diff * mu_diff);
+            prob = 1/sqrt(2*pi) * ...
+                exp(-0.5 * abs(mu_diff' / iMat_diff * mu_diff));
 
         end
         
@@ -292,9 +249,9 @@ classdef GraphSLAM < handle
         end
         
         function batch_association(obj,mu,cov)
-            N = size(obj.m,2);
+            N = obj.N_ldm;
             tic
-            for m_j = 1:100
+            for m_j = 1:N
                 for m_k = m_j+1:N
                     if obj.z.c(m_k) < m_k
                         continue
@@ -302,7 +259,7 @@ classdef GraphSLAM < handle
                     
                     P_jk = correspondence_test(obj,mu,cov,m_j,m_k);
                     %fprintf("P between %d and %d is %d\n",m_j,m_k,P_jk);
-                    if P_jk > 0.2
+                    if P_jk > 0.35
                         obj.z.c(m_k) = m_j;
                     end
                 end
@@ -329,60 +286,85 @@ classdef GraphSLAM < handle
                 end
             end
             obj.m = m_temp;
+            obj.N_ldm = size(obj.m,2);
             
             % shrink map(index related to map)
             % 1. shrink correspondence
             
-            for i = 1:size(obj.z.c,2)
+            for i = 1:obj.N_Z
                 c_idx = obj.z.c(i);
                 obj.z.c(i) = idx_lookup(c_idx);
             end
             
             % 2. shrink tau
+            tau_temp = cell(1,obj.N_ldm);
             for i = 1:size(obj.tau,2)
                 tau_idx = idx_lookup(i);
-                obj.tau{tau_idx} = union(obj.tau{tau_idx},obj.tau{i});
+                tau_temp{tau_idx} = union(tau_temp{tau_idx},obj.tau{i});
             end
-            
+            obj.tau = tau_temp;
             
             fprintf("Map Update Complete\n")        
         end           
             
         function run(obj, verbose)
+            close all
             linearize(obj);
             [tMat, tVec] = reduce(obj);
             [mu, cov] = solve(obj, tMat, tVec);
-            batch_association(obj,mu,cov)
-            update_map(obj)
-                
-            plot(obj.x(1,1),obj.x(2,1),'k*', 'MarkerSize', 8)
-            hold on
-            plot(obj.x(1,:),obj.x(2,:),'k');   
-            hold on
-            plot(obj.m(1,:),obj.m(2,:),'bo','MarkerSize', 8);
-            
-            if verbose > 2
-                linearize(obj);
-                [tMat, tVec] = reduce(obj);
-                [mu, cov] = solve(obj, tMat, tVec);
-                Mu = reshape(mu, 3, size(mu,1)/3);
-
-                M = size(obj.x,2);
-                N = size(obj.m,2);
-                obj.x =  Mu(:,1:M);
-                obj.m =  Mu(:,M+1:M+N);
-
-
-    %             Mu = reshape(mu, 3, size(mu,1)/3);
-                state = obj.x;
-                landmark = obj.m;
-                save("state_1.mat",'state')
-                save("landmark_1.mat",'landmark')
-
+            if verbose == 2
+                batch_association(obj,mu,cov)
+                update_map(obj)
                 hold on
                 plot(obj.x(1,:),obj.x(2,:),'k');    
                 plot(obj.m(1,:),obj.m(2,:),'b.','MarkerSize', 4);
+                close all 
+                
+                linearize(obj);
+                [tMat, tVec] = reduce(obj);
+                [mu, cov] = solve(obj, tMat, tVec);
+                 Mu = reshape(mu, 3, size(mu,1)/3);
+                 hold on
+                 plot(Mu(1,1:obj.N_X),Mu(2,1:obj.N_X),'k');
+                 plot(Mu(1,obj.N_ldm + 1:obj.N_ldm +obj.N_X),Mu(2,obj.N_ldm +1:obj.N_ldm +obj.N_X),'MarkerSize', 4);
+                 close all
             end
+            
+            if verbose == 3
+                j = 1;
+                while j < 8
+                    batch_association(obj,mu,cov)
+                    update_map(obj)
+                    
+                    hold on
+                    plot(obj.x(1,:),obj.x(2,:),'k');    
+                    plot(obj.m(1,:),obj.m(2,:),'b.','MarkerSize', 4);
+                    close all 
+                    linearize(obj);
+                    [tMat, tVec] = reduce(obj);
+                    [mu, cov] = solve(obj, tMat, tVec);
+                    
+                    j = j + 1;
+                end
+            end
+            Mu = reshape(mu, 3, size(mu,1)/3);
+            M = size(obj.x,2);
+            N = size(obj.m,2);
+            obj.x =  Mu(:,1:M);
+            obj.m =  Mu(:,M+1:M+N);
+
+
+%             Mu = reshape(mu, 3, size(mu,1)/3);
+            state = obj.x;
+            landmark = obj.m;
+            save("state_1.mat",'state')
+            save("landmark_1.mat",'landmark')
+
+            
+            plot(obj.x(1,:),obj.x(2,:),'k');
+            hold on
+            plot(obj.m(1,:),obj.m(2,:),'b.','MarkerSize', 4);
+
 %             plot(Mu(1,1:M)+obj.x(1,:),Mu(2,1:M)+obj.x(2,:),'r')
 %             plot(Mu(1,M+1:M+N)+obj.m(1,:),Mu(2,M+1:M+N)+obj.m(2,:),'r.','MarkerSize', 4)
 %             plot(Mu(1,1:M),Mu(2,1:M),'r')
