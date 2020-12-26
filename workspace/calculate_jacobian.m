@@ -12,4 +12,5 @@ function [ G ]= calculate_jacobian(x,u)
     G = [1 0 -T*v*(sin(fi) + 1/L*tan(alpha)*(a*cos(fi) - b*sin(fi))); 
          0 1  T*v*(cos(fi) - 1/L*tan(alpha)*(a*sin(fi) + b*cos(fi)));
          0 0  1];
+    
 end
