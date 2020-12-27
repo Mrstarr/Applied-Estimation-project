@@ -65,7 +65,9 @@ classdef GraphSLAM < handle
                         % z_t as a measurement is a 3XN matrix
                         % 1st row: range, 2nd: angle, 3rd: signature
                         % z_t(:,z_t(1,:)< r) only accepts range lower than r 
-                        z_t = z_t(:,z_t(1,:)<25);
+                        
+               % TODO: acceptable range?
+               %         z_t = z_t(:,z_t(1,:)<25);
                         n_zt = size(z_t,2);
                         obj.z.m = [obj.z.m z_t];  
                         obj.z.idx = [obj.z.idx i * ones(1,n_zt)]; 
@@ -207,7 +209,7 @@ classdef GraphSLAM < handle
                     tMat(idx_x,idx_x) = tMat(idx_x,idx_x) - tMat(idx_x,idx_j)/tMat(idx_j,idx_j)*tMat(idx_j,idx_x);
                     % should remove rows/columns corresponding to j
                     % this step is undone as we extract the prediction
-                    % inforamtion matrix as well as information vector
+                    % information matrix as well as information vector
             end
             tMat = tMat(1:obj.N_X*3,1:obj.N_X*3);
             tVec = tVec(1:obj.N_X*3);
@@ -376,13 +378,134 @@ classdef GraphSLAM < handle
             obj.tau = tau_temp;
             
             fprintf("Map Update Complete\n")   
-        end           
+        end   
+        
+% update map after association
+% and delete the outliers
+        function update_map_del(obj, threshold)
+            
+            idx = 1;    % new landmark index 
+            m_temp =[]; % new map
+            
+            % create look up table and change landmark idx
+            for i =1:obj.N_Z  % traverse measurements
+                if obj.z.c(i) == i   % shows it is unchanged, should be added
+                    idx_lookup(i) = idx;  %  i: its original idx, lookup(i): idx after shrinking 
+                    idx = idx + 1; 
+                    m_temp = [m_temp obj.m(:,i)]; % update new map
+                else  % it matches to a landmark appears before
+                    idx_lookup(i) = idx_lookup(obj.z.c(i)); % pointing to its shrinked idx
+                end
+            end
+            
+            obj.m = m_temp;     % update map
+            obj.N_ldm = size(obj.m,2);      % update landmark number   
+
+            % change correspondence idx
+            for i = 1:obj.N_Z
+                c_idx = obj.z.c(i);
+                obj.z.c(i) = idx_lookup(c_idx);
+            end
+            % now LuT has been replaced by obj.z.c!
+          
+            % change tau idx
+            tau_temp = cell(1, size(m_temp, 2));
+            for i = 1:size(obj.tau, 2)
+                tau_idx = idx_lookup(i);  % i-th measure -> idx-th ldm
+                tau_temp{tau_idx} = union(tau_temp{tau_idx},obj.tau{i});
+            end
+            obj.tau = tau_temp;
+            
+            % == TEST feature == : check and delete
+            
+            % 1. find bad landmarks idx
+            % some landmarks should be deleted
+            max_idx = max(idx_lookup);
+            del_idx_arr = zeros(max_idx, 1);  % delete(1) or not(0)
+            del_idx = [];
+            idx_times = zeros(max_idx, 1);
+            for i_idx = 1: max_idx
+                idx_times(i_idx) = sum(idx_lookup == i_idx);
+                if idx_times(i_idx) < threshold
+                    del_idx_arr(i_idx) = 1;   % will del measure with i_idx
+                    del_idx = [del_idx i_idx];
+                    fprintf("Outlier: only %d times detected\n", ...
+                        idx_times(i_idx));
+                end
+            end
+            
+            % IF NO OUTLIERS
+            if isempty(del_idx)
+                return
+            end
+            
+            % 2. traverse measurements again
+            % this time some measurements are deleted
+            % [possibly modify: N_Z, z.m, z.idx. z.c]
+            % pick z.m and z.idx, modify z.c and N_Z
+            
+            % a look-up-table for mapping idx; old -> new
+            % only the kept idx are useful, other idx are meaningless
+            new_idx_lut = cumsum(~del_idx_arr);   
+            
+            % detect outliers
+            del_measure = zeros(obj.N_Z, 1);  % 1 means delete
+            new_z_c = zeros(size(obj.z.c));   % temp for obj.z.c
+            for i = 1: obj.N_Z
+                old_idx = obj.z.c(i);  % old landmark idx
+                if ismember(old_idx, del_idx)  % outlier, remove it
+                    del_measure(i) = 1;        % flag
+                else  % not outlier, keep it and give new idx
+                    new_idx = new_idx_lut(old_idx);
+                    new_z_c(i) = new_idx;  % DO NOT change obj.z.c here!
+                end
+            end
+            fprintf('%d measurements as outliers!', sum(del_measure));
+            
+            % 3. update: measurements
+            new_z_m = obj.z.m(:, ~del_measure);
+            new_z_idx = obj.z.idx(:, ~del_measure);
+            new_z_c = new_z_c(:, ~del_measure); % UPDATE obj.z.c here!
+            obj.z.m = new_z_m;
+            obj.z.idx = new_z_idx;
+            obj.z.c = new_z_c;
+            
+            new_N_Z = size(obj.z.m, 2);
+            obj.N_Z = new_N_Z;
+
+            % 4. update: map
+            new_m_temp = m_temp(:, ~del_idx_arr);  % shrink map again
+            new_N_ldm = size(new_m_temp, 2);
+            obj.m = new_m_temp;
+            obj.N_ldm = new_N_ldm;
+            
+            % 5. update: tau
+            new_tau_temp = cell(1, obj.N_ldm);
+            tau_j = 1;
+            for i = 1: size(obj.tau, 2)
+                if del_idx_arr(i) == 0
+                    new_tau_temp{tau_j} = obj.tau{i};
+                    tau_j = tau_j + 1;
+                end
+            end
+            obj.tau = new_tau_temp;
+
+            fprintf("Map Update without Outliers Complete\n") 
+            fprintf("test delete");
+        end     
             
         function run(obj, verbose)
             
             linearize(obj);
             batch_association(obj)
-            update_map(obj)
+            
+            global DEL_THRESH
+            if verbose == 3 && DEL_THRESH > 1
+                update_map_del(obj, DEL_THRESH);
+            else
+                update_map(obj)
+            end
+            
             % to plot associated landmarks
             hold on
             plot(obj.m(1,:),obj.m(2,:),'bo','MarkerSize', 4);
@@ -400,6 +523,7 @@ classdef GraphSLAM < handle
             update_graph(obj,mu,"c");
             % to plot ground truth
             plot_G(0.1)
+            
             if verbose == 3
                 j = 1;
                 while j < 3     
